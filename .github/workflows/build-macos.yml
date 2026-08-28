@@ -1,0 +1,346 @@
+name: Build FlightGear cluster2D macOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-macos.yml"
+
+permissions:
+  contents: read
+
+env:
+  # Exact prototype provenance
+  SIMGEAR_BRANCH: perf/clustered-shading-2d
+  SIMGEAR_EXPECTED_SHA: 96a36b13
+
+  FLIGHTGEAR_BRANCH: next
+  FLIGHTGEAR_EXPECTED_SHA: b8afcce32
+
+  # Runtime FGData expected on the test Mac.
+  FGDATA_EXPECTED_SHA: c42551a6a
+
+  # Keep compilation conservative on the 7 GB M1 runner.
+  CMAKE_BUILD_PARALLEL_LEVEL: "2"
+
+  CCACHE_DIR: ${{ github.workspace }}/ccache
+  CCACHE_MAXSIZE: 2G
+
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+jobs:
+  build-macos:
+    name: macOS ARM64 cluster2D
+    runs-on: macos-26
+    timeout-minutes: 180
+
+    steps:
+      - name: Runner information
+        run: |
+          echo "=== macOS ==="
+          sw_vers
+
+          echo
+          echo "=== architecture ==="
+          uname -m
+
+          echo
+          echo "=== Xcode ==="
+          xcodebuild -version
+
+          echo
+          echo "=== hardware ==="
+          sysctl -n machdep.cpu.brand_string || true
+          sysctl -n hw.ncpu
+          sysctl -n hw.memsize
+
+      - name: Install build tools
+        run: |
+          brew install \
+            ninja \
+            cmake \
+            boost \
+            c-ares \
+            nlohmann-json \
+            ccache
+
+          echo
+          cmake --version
+          ninja --version
+          ccache --version
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: cluster2d-macos26-${{ env.SIMGEAR_EXPECTED_SHA }}-${{ env.FLIGHTGEAR_EXPECTED_SHA }}
+          restore-keys: |
+            cluster2d-macos26-
+
+      # ------------------------------------------------------------
+      # Official FlightGear dependency artifacts.
+      #
+      # This mirrors the dependencies used by FlightGear's own
+      # GitLab macOS jobs rather than rebuilding OSG/3rd-party here.
+      # ------------------------------------------------------------
+
+      - name: Download official OSG macOS artifact
+        run: |
+          curl \
+            --fail \
+            --show-error \
+            --location \
+            --retry 4 \
+            --retry-all-errors \
+            "https://gitlab.com/api/v4/projects/flightgear%2Fopenscenegraph/jobs/artifacts/next/download?job=macos-build" \
+            --output osg-artifact.zip
+
+          unzip -q osg-artifact.zip
+
+          echo "=== OSG artifact ==="
+          du -sh osg-dist
+          find osg-dist -maxdepth 2 -type d | head -40
+
+          test -d osg-dist
+
+      - name: Download official macOS third-party artifact
+        run: |
+          curl \
+            --fail \
+            --show-error \
+            --location \
+            --retry 4 \
+            --retry-all-errors \
+            "https://gitlab.com/api/v4/projects/flightgear%2Fmacos-3rd-party/jobs/artifacts/main/download?job=macos-build" \
+            --output macos-third-party-artifact.zip
+
+          unzip -q macos-third-party-artifact.zip
+
+          echo "=== macOS third-party artifact ==="
+          du -sh dist
+          find dist -maxdepth 2 -type d | head -40
+
+          test -d dist
+
+      # ------------------------------------------------------------
+      # SimGear cluster2D prototype
+      # ------------------------------------------------------------
+
+      - name: Clone SimGear cluster2D
+        run: |
+          git clone \
+            --depth 1 \
+            --branch "$SIMGEAR_BRANCH" \
+            https://gitlab.com/nvananphuc2022/simgear.git \
+            simgear
+
+          echo "=== SimGear HEAD ==="
+          git -C simgear log -1 --oneline --decorate
+
+          ACTUAL="$(git -C simgear rev-parse --short=8 HEAD)"
+          echo "Expected: $SIMGEAR_EXPECTED_SHA"
+          echo "Actual:   $ACTUAL"
+
+          test "$ACTUAL" = "$SIMGEAR_EXPECTED_SHA"
+
+          echo
+          echo "=== Prototype commit ==="
+          git -C simgear show --stat --oneline HEAD
+
+      - name: Configure SimGear
+        run: |
+          cmake \
+            -B build-simgear \
+            -S simgear \
+            -G Ninja \
+            --fresh \
+            -D CMAKE_BUILD_TYPE=RelWithDebInfo \
+            -D CMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/simgear-dist" \
+            -D CMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/osg-dist;$GITHUB_WORKSPACE/dist" \
+            -D CMAKE_OSX_ARCHITECTURES="arm64" \
+            -D ENABLE_SIMD=OFF \
+            -D ENABLE_VIDEO_RECORD:BOOL=OFF \
+            -D ENABLE_TESTS:BOOL=OFF \
+            -D ENABLE_CCACHE=ON
+
+      - name: Build and install SimGear
+        run: |
+          cmake --build build-simgear
+          cmake --build build-simgear --target install
+
+          echo
+          echo "=== SimGear install ==="
+          du -sh simgear-dist
+
+      # ------------------------------------------------------------
+      # Stock FlightGear next
+      # ------------------------------------------------------------
+
+      - name: Clone FlightGear
+        run: |
+          git clone \
+            --depth 1 \
+            --branch "$FLIGHTGEAR_BRANCH" \
+            https://gitlab.com/flightgear/flightgear.git \
+            flightgear
+
+          echo "=== FlightGear HEAD ==="
+          git -C flightgear log -1 --oneline --decorate
+
+          ACTUAL="$(git -C flightgear rev-parse --short=9 HEAD)"
+          echo "Expected: $FLIGHTGEAR_EXPECTED_SHA"
+          echo "Actual:   $ACTUAL"
+
+          test "$ACTUAL" = "$FLIGHTGEAR_EXPECTED_SHA"
+
+      - name: Configure FlightGear
+        run: |
+          # Match the intent of FlightGear's own macOS CI:
+          # prefer its supplied universal FreeType over Homebrew FreeType.
+          export FREETYPE_DIR="$GITHUB_WORKSPACE/dist"
+
+          cmake \
+            -B build-flightgear \
+            -S flightgear \
+            -G Ninja \
+            --fresh \
+            -D CMAKE_BUILD_TYPE=RelWithDebInfo \
+            -D CMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/flightgear-dist" \
+            -D CMAKE_OSX_ARCHITECTURES="arm64" \
+            -D CMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/osg-dist;$GITHUB_WORKSPACE/simgear-dist" \
+            -D ENABLE_CCACHE=ON
+
+      - name: Build and install FlightGear
+        run: |
+          cmake --build build-flightgear
+          cmake --build build-flightgear --target install
+
+          echo
+          echo "=== FlightGear install ==="
+          du -sh flightgear-dist
+
+      # ------------------------------------------------------------
+      # Validation
+      # ------------------------------------------------------------
+
+      - name: Locate and validate FlightGear binary
+        run: |
+          set -e
+
+          FG_BIN="$(find build-flightgear flightgear-dist \
+            -path '*/FlightGear.app/Contents/MacOS/FlightGear' \
+            -type f \
+            -print \
+            -quit)"
+
+          if [ -z "$FG_BIN" ]; then
+            echo "ERROR: FlightGear executable not found"
+            find build-flightgear flightgear-dist -name 'FlightGear*' -print
+            exit 1
+          fi
+
+          echo "FG_BIN=$FG_BIN"
+
+          echo
+          echo "=== architecture ==="
+          file "$FG_BIN"
+
+          echo
+          echo "=== dynamic dependencies ==="
+          otool -L "$FG_BIN"
+
+          echo
+          echo "=== LC_RPATH entries ==="
+          otool -l "$FG_BIN" |
+            awk '
+              $1 == "cmd" && $2 == "LC_RPATH" { in_rpath=1; next }
+              in_rpath && $1 == "path" {
+                print $2
+                in_rpath=0
+              }
+            '
+
+          echo
+          echo "=== version smoke test ==="
+          "$FG_BIN" --version
+
+      - name: Create provenance manifest
+        run: |
+          {
+            echo "FlightGear cluster2D macOS build"
+            echo
+            echo "Build date: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            echo "Runner architecture: $(uname -m)"
+            echo "macOS: $(sw_vers -productVersion)"
+            echo
+            echo "SimGear:"
+            echo "  repo: https://gitlab.com/nvananphuc2022/simgear.git"
+            echo "  branch: $SIMGEAR_BRANCH"
+            echo "  commit: $(git -C simgear rev-parse HEAD)"
+            echo
+            echo "FlightGear:"
+            echo "  repo: https://gitlab.com/flightgear/flightgear.git"
+            echo "  branch: $FLIGHTGEAR_BRANCH"
+            echo "  commit: $(git -C flightgear rev-parse HEAD)"
+            echo
+            echo "FGData expected for runtime:"
+            echo "  repo: https://gitlab.com/nvananphuc2022/fgdata.git"
+            echo "  branch: perf/clustered-shading-2d"
+            echo "  expected short commit: $FGDAT_EXPECTED_SHA"
+            echo
+            echo "OSG:"
+            echo "  official FlightGear GitLab macos-build artifact"
+            echo "  ref: next"
+            echo
+            echo "macOS third-party:"
+            echo "  official FlightGear GitLab macos-build artifact"
+            echo "  ref: main"
+            echo
+            echo "CMake:"
+            cmake --version | head -1
+            echo
+            echo "Xcode:"
+            xcodebuild -version
+          } > provenance.txt
+
+          cat provenance.txt
+
+      - name: ccache statistics
+        if: always()
+        run: |
+          ccache --show-stats || true
+
+      # Keep the prefixes together for the first runtime experiment.
+      # This avoids pretending the .app is relocatable before we inspect
+      # its dylib/rpath situation.
+      - name: Package runtime artifact
+        run: |
+          echo "=== sizes ==="
+          du -sh \
+            flightgear-dist \
+            simgear-dist \
+            osg-dist \
+            dist
+
+          tar -czf flightgear-cluster2d-macos-arm64.tar.gz \
+            flightgear-dist \
+            simgear-dist \
+            osg-dist \
+            dist \
+            provenance.txt
+
+          ls -lh flightgear-cluster2d-macos-arm64.tar.gz
+
+      - name: Upload runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flightgear-cluster2d-macos-arm64
+          path: |
+            flightgear-cluster2d-macos-arm64.tar.gz
+            provenance.txt
+          if-no-files-found: error
+          retention-days: 7
