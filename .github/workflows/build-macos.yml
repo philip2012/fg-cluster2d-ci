@@ -182,11 +182,15 @@ jobs:
 
       - name: Clone FlightGear
         run: |
-          git clone \
+          git init flightgear
+          git -C flightgear remote add origin \
+            https://gitlab.com/flightgear/flightgear.git
+
+          git -C flightgear fetch \
             --depth 1 \
-            --branch "$FLIGHTGEAR_BRANCH" \
-            https://gitlab.com/flightgear/flightgear.git \
-            flightgear
+            origin "$FLIGHTGEAR_EXPECTED_SHA"
+
+          git -C flightgear checkout --detach FETCH_HEAD
 
           echo "=== FlightGear HEAD ==="
           git -C flightgear log -1 --oneline --decorate
