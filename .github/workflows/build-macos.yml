@@ -215,7 +215,7 @@ jobs:
             -D CMAKE_BUILD_TYPE=RelWithDebInfo \
             -D CMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/flightgear-dist" \
             -D CMAKE_OSX_ARCHITECTURES="arm64" \
-            -D CMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/osg-dist;$GITHUB_WORKSPACE/simgear-dist" \
+            -D CMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/osg-dist;$GITHUB_WORKSPACE/simgear-dist;$GITHUB_WORKSPACE/dist" \
             -D ENABLE_CCACHE=ON
 
       - name: Build and install FlightGear
