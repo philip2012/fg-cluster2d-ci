@@ -14,13 +14,13 @@ permissions:
 env:
   # Exact prototype provenance
   SIMGEAR_BRANCH: perf/clustered-shading-2d
-  SIMGEAR_EXPECTED_SHA: 96a36b13
+  SIMGEAR_EXPECTED_SHA: 96a36b1373d1375ab779a903597c41b92ca84844
 
   FLIGHTGEAR_BRANCH: next
-  FLIGHTGEAR_EXPECTED_SHA: b8afcce32
+  FLIGHTGEAR_EXPECTED_SHA: b8afcce32cfeb68be56b1f7bbe0d88c2209cb76e
 
   # Runtime FGData expected on the test Mac.
-  FGDATA_EXPECTED_SHA: c42551a6a
+  FGDATA_EXPECTED_SHA: c42551a6a5a3048a79d685cc8e4981535395a7f4
 
   # Keep compilation conservative on the 7 GB M1 runner.
   CMAKE_BUILD_PARALLEL_LEVEL: "2"
