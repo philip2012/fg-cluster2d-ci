@@ -141,7 +141,7 @@ jobs:
           echo "=== SimGear HEAD ==="
           git -C simgear log -1 --oneline --decorate
 
-          ACTUAL="$(git -C simgear rev-parse --short=8 HEAD)"
+          ACTUAL="$(git -C simgear rev-parse HEAD)"
           echo "Expected: $SIMGEAR_EXPECTED_SHA"
           echo "Actual:   $ACTUAL"
 
@@ -191,7 +191,7 @@ jobs:
           echo "=== FlightGear HEAD ==="
           git -C flightgear log -1 --oneline --decorate
 
-          ACTUAL="$(git -C flightgear rev-parse --short=9 HEAD)"
+          ACTUAL="$(git -C flightgear rev-parse HEAD)"
           echo "Expected: $FLIGHTGEAR_EXPECTED_SHA"
           echo "Actual:   $ACTUAL"
 
@@ -290,7 +290,7 @@ jobs:
             echo "FGData expected for runtime:"
             echo "  repo: https://gitlab.com/nvananphuc2022/fgdata.git"
             echo "  branch: perf/clustered-shading-2d"
-            echo "  expected short commit: $FGDAT_EXPECTED_SHA"
+            echo "  expected short commit: $FGDATA_EXPECTED_SHA"
             echo
             echo "OSG:"
             echo "  official FlightGear GitLab macos-build artifact"
